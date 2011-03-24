@@ -72,8 +72,8 @@ class LikeABossSource extends DataSource {
 		}
 
 		$results = array();
-		if (!empty($this->reponse->bossresponse->web->results)) {
-			foreach ($this->reponse->bossresponse->web->results as $record) {
+		if (!empty($this->response->bossresponse->web->results)) {
+			foreach ($this->response->bossresponse->web->results as $record) {
 				$results[] = array($Model->alias => (array)$record);
 			}
 		}
@@ -81,7 +81,7 @@ class LikeABossSource extends DataSource {
 		if (Set::extract($queryData, 'fields') == '__yahoo_count' ) {
 			return array(
 				array(
-					$Model->alias => array('count' => $this->reponse->bossresponse->web->totalresults),
+					$Model->alias => array('count' => $this->response->bossresponse->web->totalresults),
 				),
 			);
 		}
@@ -90,7 +90,7 @@ class LikeABossSource extends DataSource {
 	}
 
 	public function calculate(&$model, $func, $params = array()) {
-		return '__'.$func;
+		return '__yahoo_count';
 	}
 
 }
