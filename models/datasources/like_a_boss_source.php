@@ -2,7 +2,7 @@
 
 class LikeABossSource extends DataSource {
 
-	public static $response;
+	public $response;
 	public $defaults = array(
 		'services' => array('web'),
 	);
@@ -63,9 +63,12 @@ class LikeABossSource extends DataSource {
 		$query = array_filter($query);
 		unset($query['fields'], $query['page'], $query['callbacks']);
 
-		if (!isset($this->reponse)) {
-			$this->reponse = $this->oauth->get($this->config['access_token'], $this->config['access_secret'], 'http://yboss.yahooapis.com/ysearch/'.$services, $query);
-			$this->reponse = json_decode($this->reponse);
+		if (!isset($this->response)) {
+			$this->response = $this->oauth->get($this->config['access_token'], $this->config['access_secret'], 'http://yboss.yahooapis.com/ysearch/'.$services, $query);
+			$this->response = json_decode($this->response);
+			if (!is_object($this->response)) {
+				$this->response = array();
+			}
 		}
 
 		$results = array();
