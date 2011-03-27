@@ -12,8 +12,10 @@ class LikeABossComponent extends Object {
 	public function requestToken($callbackUrl = '') {
 		$this->controller->autoRender = false;
 		$response = $this->LikeABoss->requestToken($callbackUrl);
-		$this->controller->Session->write('LikeABoss.response', $response);
-		$this->controller->redirect('https://api.login.yahoo.com/oauth/v2/request_auth?oauth_token=' . $response->key);
+		if (!empty($response['xoauth_request_auth_url'])) {
+			$this->controller->Session->write('LikeABoss.response', $response);
+			$this->controller->redirect($response['xoauth_request_auth_url']);
+		}
 	}
 
 	public function requestAccessToken() {
