@@ -19,18 +19,32 @@ class LikeABossSource extends DataSource {
 	public function buildOAuth() {
 		$this->oauth = new OAuth($this->config['consumer_key'], $this->config['consumer_secret'], OAUTH_SIG_METHOD_HMACSHA1, OAUTH_AUTH_TYPE_URI);
 		$this->oauth->enableDebug();
-		if (!empty($this->config['access_token']) && !empty($this->config['access_secret'])) {
-			$this->oauth->setToken($this->config['access_token'], $this->config['access_secret']);
+	}
+
+	public function renewAccessToken() {
+		$accessTokens = Cache::read('LikeABoss.access_tokens', 'like_a_boss');
+		if (!empty($accessTokens['oauth_token'])) {
+			$tokenRemaining = ($accessTokens['access_token_received'] + $accessTokens['oauth_expires_in']) - time();
+			$tokenRemaining = 0;
+			if ($tokenRemaining < 60) {
+				$this->requestAccessToken($accessTokens);
+				Cache::write('LikeABoss.access_tokens', $accessTokens, 'like_a_boss');
+			}
+			$this->oauth->setToken($accessTokens['oauth_token'], $accessTokens['oauth_token_secret']);
 		}
 	}
 
 	public function requestToken($callbackUrl) {
-		$this->buildOAuth();
+		if (!is_object($this->oauth)) {
+			$this->buildOAuth();
+		}
 		return $this->oauth->getRequestToken('https://api.login.yahoo.com/oauth/v2/get_request_token', Router::url($callbackUrl, true));
 	}
 
 	public function requestAccessToken($requestTokens) {
-		$this->buildOAuth();
+		if (!is_object($this->oauth)) {
+			$this->buildOAuth();
+		}
 		$this->oauth->setToken($requestTokens['oauth_token'], $requestTokens['oauth_token_secret']);
 		return $this->oauth->getAccessToken('https://api.login.yahoo.com/oauth/v2/get_token');
 	}
@@ -83,7 +97,9 @@ class LikeABossSource extends DataSource {
 
 		if (!isset($this->response)) {
 			$this->buildOAuth();
+
 			try {
+				$this->renewAccessToken();
 				$this->response = $this->oauth->fetch('http://yboss.yahooapis.com/ysearch/'.$services, $this->encodeParams($query), OAUTH_HTTP_METHOD_GET);
 			} catch (OAuthException $error) {
 				debug($error->getMessage());

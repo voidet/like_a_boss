@@ -22,7 +22,8 @@ class LikeABossComponent extends Object {
 		$this->controller->autoRender = false;
 		$requestToken = $this->Session->read('LikeABoss.response');
 		$accessToken = $this->LikeABoss->requestAccessToken($requestToken);
-		return $accessToken;
+		$accessToken['access_token_received'] = time();
+		return Cache::write('LikeABoss.access_tokens', $accessToken, 'like_a_boss');
 	}
 
 }
