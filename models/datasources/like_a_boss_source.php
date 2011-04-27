@@ -18,7 +18,6 @@ class LikeABossSource extends DataSource {
 
 	public function buildOAuth() {
 		$this->oauth = new OAuth($this->config['consumer_key'], $this->config['consumer_secret'], OAUTH_SIG_METHOD_HMACSHA1, OAUTH_AUTH_TYPE_URI);
-		$this->oauth->enableDebug();
 	}
 
 	public function renewAccessToken() {
@@ -57,13 +56,21 @@ class LikeABossSource extends DataSource {
 		if (!is_object($this->oauth)) {
 			$this->buildOAuth();
 		}
-		return $this->oauth->getRequestToken('https://api.login.yahoo.com/oauth/v2/get_request_token', Router::url($callbackUrl, true));
+		try {
+			return $this->oauth->getRequestToken('https://api.login.yahoo.com/oauth/v2/get_request_token', Router::url($callbackUrl, true));
+		} catch (OAuthException $error) {
+			$this->log($this->oauth->debugInfo);
+		}
 	}
 
 	public function requestAccessToken($requestTokens) {
 		$this->buildOAuth();
 		$this->oauth->setToken($requestTokens['oauth_token'],  $requestTokens['oauth_token_secret']);
-		return $this->oauth->getAccessToken('https://api.login.yahoo.com/oauth/v2/get_token');
+		try {
+			return $this->oauth->getAccessToken('https://api.login.yahoo.com/oauth/v2/get_token');
+		} catch (OAuthException $error) {
+			$this->log($this->oauth->debugInfo);
+		}
 	}
 
 	public function encodeParams($data) {
@@ -110,17 +117,19 @@ class LikeABossSource extends DataSource {
 		}
 
 		$query = array_filter($query);
+		$query['format'] = 'json';
 		unset($query['fields'], $query['page'], $query['callbacks']);
 
 		if (!isset($this->response)) {
 			$this->buildOAuth();
-
 			try {
 				$this->renewAccessToken();
-				$this->response = $this->oauth->fetch('http://yboss.yahooapis.com/ysearch/'.$services, $this->encodeParams($query), OAUTH_HTTP_METHOD_GET);
+				$this->oauth->fetch('http://yboss.yahooapis.com/ysearch/'.$services, $this->encodeParams($query), OAUTH_HTTP_METHOD_GET);
 			} catch (OAuthException $error) {
 				$this->log($this->oauth->debugInfo);
 			}
+
+			$this->response = $this->oauth->getLastResponse();
 			$this->response = json_decode($this->response);
 			if (!is_object($this->response)) {
 				$this->response = array();
@@ -132,26 +141,43 @@ class LikeABossSource extends DataSource {
 			foreach ($this->response->bossresponse->web->results as $record) {
 				$results[] = array($Model->alias => (array)$record);
 			}
+			$results['web'] = $this->__getPage($results, $queryData);
 		}
 
-		if (Set::extract($queryData, 'fields') == '__yahoo_count' ) {
+		if (!empty($this->response->bossresponse->spelling->results)) {
+			$spelling = array();
+			foreach ($this->response->bossresponse->spelling->results as $suggestion) {
+				$spelling['suggestion'] = (array)$suggestion;
+			}
+			$results['spelling'] = $spelling;
+		}
+
+		if (Set::extract($queryData, 'fields') == '__count' ) {
 			if (empty($this->response->bossresponse->web->totalresults)) {
 				$count = 0;
 			} else {
 				$count = $this->response->bossresponse->web->totalresults;
 			}
-			return array(
-				array(
-					$Model->alias => array('count' => $count),
-				),
-			);
+
+			return array(array($Model->alias => array('count' => $count)));
 		}
 
 		return $results;
 	}
 
+	//Credit to Richard Willis Owen on his guide to pagination
+	private function __getPage($items = null, $queryData = array()) {
+		if (empty($queryData['limit'])) {
+			return $items;
+		}
+		$limit = $queryData['limit'];
+		$page = $queryData['page'];
+		$offset = $limit * ($page - 1);
+		return array_slice($items, $offset, $limit);
+	}
+
 	public function calculate(&$model, $func, $params = array()) {
-		return '__yahoo_count';
+		return '__'.$func;
 	}
 
 }
