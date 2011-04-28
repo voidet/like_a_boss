@@ -95,17 +95,23 @@ class LikeABossSource extends DataSource {
 		$query = array();
 		if (count($queryData['services']) > 1) {
 			foreach ($queryData['services'] as $service => $values) {
-				$query[$service.'.q'] = trim(implode(' ', array_map('strtolower', $values['terms'])));
+
+				if ($service == 'spelling') {
+					$query[$service.'.q'] = trim(implode(' ', array_map('strtolower', $values['terms'])));
+					continue;
+				}
+
+				$query[$service.'.q'] = 'inbody:'.trim(implode(' ', array_map('strtolower', $values['terms'])));
 				if (!empty($values['sites'])) {
-					$query[$service.'.q'] = $query[$service.'.q'].' site:'.implode(',', $values['sites']);
+					$query[$service.'.q'] = $query[$service.'.q'].'(site:'.implode(' OR site:', $values['sites']).')';
 				}
 			}
 		} else {
 			$service = array_shift($queryData['services']);
 			$query['q'] = trim(urlencode(implode(' ', array_map('strtolower', $service['terms']))));
 
-			if (!empty($service['sites'])) {
-				$query['q'] = $query['q'].' site:'.implode(',', $service['sites']);
+			if (!empty($service['site'])) {
+				$query['q'] = 'inbody:'.$query['q'].'(site:'.$service['site'].')';
 			}
 		}
 
