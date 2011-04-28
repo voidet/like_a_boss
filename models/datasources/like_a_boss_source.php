@@ -18,6 +18,7 @@ class LikeABossSource extends DataSource {
 
 	public function buildOAuth() {
 		$this->oauth = new OAuth($this->config['consumer_key'], $this->config['consumer_secret'], OAUTH_SIG_METHOD_HMACSHA1, OAUTH_AUTH_TYPE_URI);
+		$this->oauth->enableDebug();
 	}
 
 	public function renewAccessToken() {
@@ -82,21 +83,30 @@ class LikeABossSource extends DataSource {
 	}
 
 	public function read(&$Model, $queryData = array()) {
+
 		$arrayMappings = array(
 			'offset' => 'start',
 			'limit' => 'count',
 		);
 
+		$services = $queryData['services'];
 		ksort($queryData['services']);
-		$services = implode(',', array_keys($queryData['services']));
 
 		$query = array();
 		if (count($queryData['services']) > 1) {
-			foreach ($queryData['services'] as $service => $terms) {
-				$query[$service.'.q'] = implode(' ', array_map('strtolower', $terms));
+			foreach ($queryData['services'] as $service => $values) {
+				$query[$service.'.q'] = trim(implode(' ', array_map('strtolower', $values['terms'])));
+				if (!empty($values['sites'])) {
+					$query[$service.'.q'] = $query[$service.'.q'].' site:'.implode(',', $values['sites']);
+				}
 			}
 		} else {
-			$query['q'] = urlencode(implode(' + ', array_map('strtolower', array_shift($queryData['services']))));
+			$service = array_shift($queryData['services']);
+			$query['q'] = trim(urlencode(implode(' ', array_map('strtolower', $service['terms']))));
+
+			if (!empty($service['sites'])) {
+				$query['q'] = $query['q'].' site:'.implode(',', $service['sites']);
+			}
 		}
 
 		unset($queryData['services']);
@@ -120,46 +130,72 @@ class LikeABossSource extends DataSource {
 		$query['format'] = 'json';
 		unset($query['fields'], $query['page'], $query['callbacks']);
 
-		if (!isset($this->response)) {
-			$this->buildOAuth();
-			try {
-				$this->renewAccessToken();
-				$this->oauth->fetch('http://yboss.yahooapis.com/ysearch/'.$services, $this->encodeParams($query), OAUTH_HTTP_METHOD_GET);
-			} catch (OAuthException $error) {
-				$this->log($this->oauth->debugInfo);
-			}
+		if (Set::extract($queryData, 'fields') == '__count') {
+			$primaryService = array_shift(array_keys($services));
+			$countQuery = $query;
+			ksort($countQuery);
+			$count = Cache::read('LikeABoss-count'.md5(serialize($countQuery)), 'like_a_boss');
 
-			$this->response = $this->oauth->getLastResponse();
-			$this->response = json_decode($this->response);
-			if (!is_object($this->response)) {
-				$this->response = array();
-			}
-		}
-
-		$results = array();
-		if (!empty($this->response->bossresponse->web->results)) {
-			foreach ($this->response->bossresponse->web->results as $record) {
-				$results[] = array($Model->alias => (array)$record);
-			}
-			$results['web'] = $this->__getPage($results, $queryData);
-		}
-
-		if (!empty($this->response->bossresponse->spelling->results)) {
-			$spelling = array();
-			foreach ($this->response->bossresponse->spelling->results as $suggestion) {
-				$spelling['suggestion'] = (array)$suggestion;
-			}
-			$results['spelling'] = $spelling;
-		}
-
-		if (Set::extract($queryData, 'fields') == '__count' ) {
-			if (empty($this->response->bossresponse->web->totalresults)) {
-				$count = 0;
-			} else {
-				$count = $this->response->bossresponse->web->totalresults;
+			if (empty($count)) {
+				$this->__getQuery($query, $services, true);
+				if (empty($this->response['bossresponse'][$primaryService]['totalresults'])) {
+					$count = 0;
+				} else {
+					$count = $this->response['bossresponse'][$primaryService]['totalresults'];
+				}
 			}
 
 			return array(array($Model->alias => array('count' => $count)));
+		} else {
+			$this->__getQuery($query, $services);
+		}
+
+		$results = $this->__formatResults($Model, $this->response, $queryData);
+		return $results;
+	}
+
+	private function __getQuery($query = array(), $services = '', $count = false) {
+		$this->buildOAuth();
+		try {
+			//Taking out use of Access tokens for now as Boss v2 looks like they no longer require it.
+			//$this->renewAccessToken();
+			$this->oauth->fetch('http://yboss.yahooapis.com/ysearch/'.implode(',', array_keys($services)), $this->encodeParams($query), OAUTH_HTTP_METHOD_GET);
+		} catch (OAuthException $error) {
+			$this->log($this->oauth->debugInfo);
+		}
+
+		//Sorry but Yahoo returns invalid JSON at this point in time
+		$json = str_replace(',"fingerprint":{"type":"default",}', '', $this->oauth->getLastResponse());
+		$this->response = json_decode($json, true);
+		if (!empty($this->response)) {
+			ksort($query);
+			$primaryService = array_shift(array_keys($services));
+			unset($query['start']);
+			Cache::write('LikeABoss-count'.md5(serialize($query)), $this->response['bossresponse'][$primaryService]['totalresults'], 'like_a_boss');
+		}
+	}
+
+	private function __formatResults(&$Model, $response, $queryData) {
+		$results = array();
+		$webResults = array();
+		$pagedResults = array('web', 'limitedweb', 'images');
+
+		foreach ($pagedResults as $service) {
+			$serviceResults = array();
+			if (!empty($response['bossresponse'][$service]['results'])) {
+				foreach ($response['bossresponse'][$service]['results'] as $record) {
+					$serviceResults[] = array($Model->alias => $record);
+				}
+				$results[$service] = $this->__getPage($serviceResults, $queryData);
+			}
+		}
+
+		$spellingResults = array();
+		if (!empty($response['bossresponse']['spelling']['results'])) {
+			foreach ($response['bossresponse']['spelling']['results'] as $suggestion) {
+				$spellingResults[] = $suggestion;
+			}
+			$results['spelling'] = $spellingResults;
 		}
 
 		return $results;
@@ -172,7 +208,7 @@ class LikeABossSource extends DataSource {
 		}
 		$limit = $queryData['limit'];
 		$page = $queryData['page'];
-		$offset = $limit * ($page - 1);
+		$offset = 0;
 		return array_slice($items, $offset, $limit);
 	}
 
