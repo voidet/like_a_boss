@@ -173,7 +173,7 @@ class LikeABossSource extends DataSource {
 		//Sorry but Yahoo returns invalid JSON at this point in time
 		$json = str_replace(',"fingerprint":{"type":"default",}', '', $this->oauth->getLastResponse());
 		$this->response = json_decode($json, true);
-		if (!empty($this->response)) {
+		if (!empty($this->response) && empty($this->response['error'])) {
 			ksort($query);
 			$primaryService = array_shift(array_keys($services));
 			unset($query['start']);
